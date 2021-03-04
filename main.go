@@ -2,22 +2,62 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"math"
+	"net/http"
+	"strconv"
 )
 
 const (
-	width, height = 600, 320            // canvas size in pixels
-	cells         = 100                 // number of grid cells
-	xyrange       = 30.0                // axis ranges (-xyrange..+xyrange)
-	xyscale       = width / 2 / xyrange // pixels per x or y unit
-	zscale        = height * 0.4        // pixels per z unit
-	angle         = math.Pi / 6         // angle of x, y axes (=30°)
+	defaultWidth, defaultHeight = 600, 320    // canvas size in pixels
+	cells                       = 100         // number of grid cells
+	xyrange                     = 30.0        // axis ranges (-xyrange..+xyrange)
+	angle                       = math.Pi / 6 // angle of x, y axes (=30°)
 )
 
 var sin30, cos30 = math.Sin(angle), math.Cos(angle) // sin(30°), cos(30°)
+var xyscale float64
+var zscale float64
+var width uint64
+var height uint64
 
 func main() {
-	fmt.Printf("<svg xmlns='http://www.w3.org/2000/svg' "+
+	http.HandleFunc("/surface", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		r.ParseForm()
+		var err error
+
+		if qv, ok := r.Form["width"]; ok {
+			width, err = strconv.ParseUint(qv[0], 10, 64)
+
+			if err != nil {
+				width = defaultWidth
+			}
+		} else {
+			width = defaultWidth
+		}
+
+		if qv, ok := r.Form["height"]; ok {
+			height, err = strconv.ParseUint(qv[0], 10, 64)
+
+			if err != nil {
+				height = defaultHeight
+			}
+		} else {
+			height = defaultHeight
+		}
+
+		xyscale = float64(width) / 2 / xyrange // pixels per x or y unit
+		zscale = float64(height) * 0.4
+		buildSurface(w)
+	})
+
+	log.Fatal(http.ListenAndServe("localhost:8000", nil))
+}
+
+func buildSurface(out io.Writer) {
+	fmt.Fprintf(out, "<svg xmlns='http://www.w3.org/2000/svg' "+
 		"style='stroke: grey; fill: white; stroke-width: 0.7' "+
 		"width='%d' hight='%d'>", width, height)
 
@@ -42,11 +82,11 @@ func main() {
 				redValue = int(maxZ * 25)
 			}
 
-			fmt.Printf("<polygon fill='rgb(%d, 0, %d)' points='%g,%g %g,%g %g,%g %g,%g' />\n", redValue, blueValue, ax, ay, bx, by, cx, cy, dx, dy)
+			fmt.Fprintf(out, "<polygon fill='rgb(%d, 0, %d)' points='%g,%g %g,%g %g,%g %g,%g' />\n", redValue, blueValue, ax, ay, bx, by, cx, cy, dx, dy)
 		}
 	}
 
-	fmt.Println("</svg>")
+	fmt.Fprintln(out, "</svg>")
 }
 
 func isSomeNumberInvalid(numbers ...float64) bool {
@@ -80,8 +120,8 @@ func corner(i, j int) (float64, float64, float64) {
 	z := f(x, y)
 
 	// Project (x, y, z) isometrically onto 2-D SVG canvas (sx, sy)
-	sx := width/2 + (x-y)*cos30*xyscale
-	sy := height/2 + (x+y)*sin30*xyscale - z*zscale
+	sx := float64(width)/2 + (x-y)*cos30*xyscale
+	sy := float64(height)/2 + (x+y)*sin30*xyscale - z*zscale
 
 	return sx, sy, z
 }
